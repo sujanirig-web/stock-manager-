@@ -86,8 +86,8 @@ function render() {
     <div class="max-w-7xl mx-auto p-6">
       <!-- Header -->
       <div class="mb-6">
-        <h1 class="text-2xl font-bold text-zinc-900">Pascal‑stocks</h1>
-        <p class="text-sm text-zinc-500">Inventory (NPR)</p>
+        <h1 class="text-2xl font-bold text-zinc-900">stocks</h1>
+        <p class="text-sm text-zinc-500">Inventory</p>
       </div>
 
       <!-- Stats Cards -->
@@ -124,7 +124,7 @@ function render() {
       <!-- Product Table -->
       <div class="bg-white rounded-lg border shadow-sm overflow-x-auto">
         <table class="w-full text-left text-sm">
-          <thead class="bg-zinc-50 border-b"><tr>${['SKU', 'Product', 'Category', 'Price (NPR)', 'Stock', 'Status', 'Value (NPR)', 'Actions'].map(h => `<th class="p-3 text-xs font-semibold text-zinc-500 uppercase">${h}</th>`).join('')}?</thead>
+          <thead class="bg-zinc-50 border-b"><tr>${['SKU', 'Product', 'Category', 'Price (NPR)', 'Stock', 'Status', 'Value', 'Actions'].map(h => `<th class="p-3 text-xs font-semibold text-zinc-500 uppercase">${h}</th>`).join('')}?</thead>
           <tbody class="divide-y">
             ${filtered.map(p => `
               <tr class="hover:bg-zinc-50/50">
