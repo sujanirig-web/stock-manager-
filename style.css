@@ -19,3 +19,14 @@
     overflow-x: auto;
   }
 }
+
+/* Prevent zoom on input focus (mobile) */
+input, select, textarea, button {
+  font-size: 16px !important;   /* Browsers zoom if font < 16px */
+  touch-action: manipulation;   /* Removes double-tap zoom */
+}
+
+/* Keep labels and other text small (optional) */
+label, .text-xs {
+  font-size: 0.75rem !important;
+}
