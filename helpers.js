@@ -1,4 +1,4 @@
-// Toast notification
+
 export function showToast(message, type = "success") {
   const toastEl = document.getElementById("toast");
   if (!toastEl) return;
@@ -15,12 +15,12 @@ export function showToast(message, type = "success") {
   }, 3000);
 }
 
-// Format NPR currency
+
 export function formatNPR(amount) {
   return `रू ${amount.toFixed(2)}`;
 }
 
-// Escape HTML to prevent XSS
+
 export function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/[&<>]/g, m => {
@@ -31,7 +31,7 @@ export function escapeHtml(str) {
   });
 }
 
-// Generate random SKU (if user leaves blank)
+
 export function generateSku() {
   return `SKU-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 }

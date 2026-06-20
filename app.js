@@ -5,19 +5,19 @@ import {
   query, orderBy, getDocs
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-// ---------- Global State ----------
+
 let products = [];
 let categories = [];
 let searchQuery = '';
 let selectedCategory = 'All';
 let statusFilter = 'All';
 let deleteConfirmId = null;
-let statsMode = 'all'; // 'all' or 'category'
+let statsMode = 'all';
 
 const productsRef = collection(db, "products");
 const categoriesRef = collection(db, "categories");
 
-// ---------- Default categories ----------
+
 const DEFAULT_CATEGORIES = [
   'Smartphones (New)', 'Smartphones (Used/Refurbished)', 'Feature Phones',
   'Earphones (Wired)', 'Earphones (Wireless/TWS)', 'Headphones (Wired)', 'Headphones (Wireless)',
@@ -43,7 +43,7 @@ async function seedDefaultCategories() {
   }
 }
 
-// ---------- Product CRUD ----------
+
 async function addProduct(data) {
   try {
     await addDoc(productsRef, data);
@@ -82,7 +82,7 @@ async function deleteProduct(id) {
   }
 }
 
-// ---------- Category CRUD ----------
+
 async function addCategory(name) {
   if (!name.trim()) return showToast("Category name required", "error");
   const exists = categories.some(c => c.name.toLowerCase() === name.trim().toLowerCase());
@@ -106,7 +106,7 @@ async function deleteCategory(id) {
   render();
 }
 
-// ---------- Stats calculation ----------
+
 function computeStats(productList) {
   return productList.reduce((acc, p) => {
     acc.value += p.price * p.stock;
@@ -117,9 +117,25 @@ function computeStats(productList) {
   }, { value: 0, items: 0, low: 0, out: 0 });
 }
 
-// ---------- Render UI ----------
+
+function generateSmartSKU(name) {
+  if (!name.trim()) return '';
+  const words = name.trim().split(/\s+/).slice(0, 2);
+  if (words.length === 0) return '';
+  const skuParts = words.map(word => {
+   
+    const digits = word.match(/\d+/);
+    if (digits) return digits[0];
+   
+    return word.length >= 2 ? word.substring(0, 2) : word;
+  });
+  const sku = skuParts.join('-');
+  console.log(`Generated SKU for "${name}": "${sku}"`); 
+  return sku;
+}
+
+
 function render() {
-  // Filter products for display (applies search, category, status)
   const filtered = products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                         (p.sku || '').toLowerCase().includes(searchQuery.toLowerCase());
@@ -131,7 +147,6 @@ function render() {
     return matchSearch && matchCat && matchStatus;
   });
 
-  // Compute stats based on current mode
   let stats;
   let statsLabel = '';
   if (statsMode === 'category' && selectedCategory !== 'All') {
@@ -151,13 +166,11 @@ function render() {
 
   appDiv.innerHTML = `
     <div class="max-w-7xl mx-auto p-6">
-      <!-- Header -->
       <div class="mb-6" id="headerAdminTrigger" style="cursor: pointer;">
         <h1 class="text-2xl font-bold text-zinc-900">stocks</h1>
         <p class="text-sm text-zinc-500">Inventory (double‑click header to manage categories)</p>
       </div>
 
-      <!-- Stats Cards with Larger Toggle -->
       <div class="relative mb-6">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div class="bg-white p-4 rounded-lg border shadow-sm">
@@ -173,7 +186,6 @@ function render() {
             <p class="text-2xl font-bold">${alertCount}</p>
           </div>
         </div>
-        <!-- Larger Toggle Button (right aligned, bigger tap area) -->
         <div class="absolute top-2 right-2">
           <button id="toggleStatsMode" class="flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-full px-4 py-2 shadow-md hover:shadow-lg transition-all duration-200">
             <span class="text-sm font-medium text-zinc-700">${statsMode === 'all' ? 'All Products' : 'Category Only'}</span>
@@ -184,7 +196,6 @@ function render() {
         </div>
       </div>
 
-      <!-- Filters -->
       <div class="flex flex-wrap gap-3 mb-4">
         <input type="text" id="searchInput" placeholder="Search by name or SKU..." value="${escapeHtml(searchQuery)}" class="flex-1 px-3 py-2 border rounded-md text-sm">
         <select id="categorySelect" class="px-3 py-2 border rounded-md text-sm bg-white">
@@ -200,7 +211,6 @@ function render() {
         <button id="clearFilters" class="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 rounded-md text-sm">Clear</button>
       </div>
 
-      <!-- Inline Add Row -->
       <form id="inlineAddForm" class="bg-white p-3 rounded-lg border shadow-sm mb-4 flex flex-wrap gap-2 items-end">
         <div class="flex-1 min-w-[100px]"><label class="block text-xs text-zinc-500 mb-1">SKU</label><input type="text" id="newSku" placeholder="Auto" class="w-full px-2 py-1 border rounded text-sm"></div>
         <div class="flex-1 min-w-[140px]"><label class="block text-xs text-zinc-500 mb-1">Product Name *</label><input type="text" id="newName" required class="w-full px-2 py-1 border rounded text-sm"></div>
@@ -211,7 +221,6 @@ function render() {
         <button type="submit" class="px-4 py-1 bg-zinc-900 text-white rounded-md text-sm h-9">+ Add</button>
       </form>
 
-      <!-- Product Table -->
       <div class="bg-white rounded-lg border shadow-sm overflow-x-auto">
         <table class="w-full text-left text-sm">
           <thead class="bg-zinc-50 border-b"><tr>${['SKU', 'Product', 'Category', 'Price (NPR)', 'Stock', 'Status', 'Value', 'Actions'].map(h => `<th class="p-3 text-xs font-semibold text-zinc-500 uppercase">${h}</th>`).join('')}?</thead>
@@ -284,15 +293,13 @@ function render() {
   attachEventListeners();
 }
 
-// ---------- Attach Event Listeners ----------
+
 function attachEventListeners() {
-  // Filters
   document.getElementById('searchInput')?.addEventListener('input', e => { searchQuery = e.target.value; render(); });
   document.getElementById('categorySelect')?.addEventListener('change', e => { selectedCategory = e.target.value; render(); });
   document.getElementById('statusSelect')?.addEventListener('change', e => { statusFilter = e.target.value; render(); });
   document.getElementById('clearFilters')?.addEventListener('click', () => { searchQuery = ''; selectedCategory = 'All'; statusFilter = 'All'; render(); });
 
-  // Toggle stats mode with larger button
   const toggleBtn = document.getElementById('toggleStatsMode');
   if (toggleBtn) {
     toggleBtn.addEventListener('click', () => {
@@ -301,7 +308,6 @@ function attachEventListeners() {
     });
   }
 
-  // Inline add
   const addForm = document.getElementById('inlineAddForm');
   if (addForm) {
     addForm.addEventListener('submit', async (e) => {
@@ -327,9 +333,20 @@ function attachEventListeners() {
       document.getElementById('newPrice').value = '';
       document.getElementById('newMinStock').value = '5';
     });
+
+    const newNameInput = document.getElementById('newName');
+    const newSkuInput = document.getElementById('newSku');
+    if (newNameInput && newSkuInput) {
+      newNameInput.addEventListener('input', () => {
+ 
+        const generated = generateSmartSKU(newNameInput.value);
+        if (generated) newSkuInput.value = generated;
+        else newSkuInput.value = ''; 
+      });
+    }
   }
 
-  // Stock buttons
+  
   document.querySelectorAll('.incr').forEach(btn => btn.addEventListener('click', async () => {
     const id = btn.dataset.id;
     const prod = products.find(p => p.id === id);
@@ -341,7 +358,6 @@ function attachEventListeners() {
     if (prod && prod.stock > 0) await updateStock(id, prod.stock - 1);
   }));
 
-  // Edit / Delete
   document.querySelectorAll('.edit-product').forEach(btn => btn.addEventListener('click', () => {
     const id = btn.dataset.id;
     const prod = products.find(p => p.id === id);
@@ -361,7 +377,6 @@ function attachEventListeners() {
     render();
   }));
 
-  // Edit modal
   const modal = document.getElementById('editModal');
   document.getElementById('closeModalBtn')?.addEventListener('click', () => modal.classList.add('hidden'));
   document.getElementById('editForm')?.addEventListener('submit', async (e) => {
@@ -382,7 +397,6 @@ function attachEventListeners() {
     modal.classList.add('hidden');
   });
 
-  // Category Admin Modal
   const catModal = document.getElementById('categoryModal');
   const openAdmin = () => catModal.classList.remove('hidden');
   const closeAdmin = () => catModal.classList.add('hidden');
@@ -397,7 +411,6 @@ function attachEventListeners() {
     closeAdmin();
     openAdmin();
   });
-  // Edit category
   document.querySelectorAll('.edit-cat').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
@@ -409,7 +422,6 @@ function attachEventListeners() {
       openAdmin();
     });
   });
-  // Delete category
   document.querySelectorAll('.delete-cat').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
@@ -431,9 +443,26 @@ function openEditModal(product) {
   document.getElementById('editStock').value = product.stock;
   document.getElementById('editMinStock').value = product.minStock || 5;
   modal.classList.remove('hidden');
+
+  
+  const editNameInput = document.getElementById('editName');
+  const editSkuInput = document.getElementById('editSku');
+  if (editNameInput && editSkuInput) {
+   
+    const generated = generateSmartSKU(editNameInput.value);
+    if (generated) editSkuInput.value = generated;
+   
+    editNameInput.removeEventListener('input', editNameInput._skuHandler);
+    editNameInput._skuHandler = function() {
+      const gen = generateSmartSKU(editNameInput.value);
+      if (gen) editSkuInput.value = gen;
+      else editSkuInput.value = '';
+    };
+    editNameInput.addEventListener('input', editNameInput._skuHandler);
+  }
 }
 
-// ---------- Firestore Real‑time Listeners ----------
+
 const productsQuery = query(productsRef, orderBy('name'));
 onSnapshot(productsQuery, (snapshot) => {
   products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));

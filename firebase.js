@@ -1,7 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-// 🔥 YOUR FIREBASE CONFIG (copy from Firebase Console)
 const firebaseConfig = {
   apiKey: "AIzaSyDpZJ0uwXBbT9M6AqzRZIFa3Y4GycmyeiE",
   authDomain: "stock-manager-2c60f.firebaseapp.com",
@@ -12,6 +11,5 @@ const firebaseConfig = {
   measurementId: "G-29MHF9TPCV"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
