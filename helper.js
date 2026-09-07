@@ -1,7 +1,10 @@
 
+let toastTimeout;
+
 export function showToast(message, type = "success") {
   const toastEl = document.getElementById("toast");
   if (!toastEl) return;
+  clearTimeout(toastTimeout);
   toastEl.innerHTML = `<div class="px-4 py-3 rounded-md shadow-md border text-sm ${
     type === "error" ? "bg-red-100 text-red-800 border-red-200" :
     type === "warning" ? "bg-amber-100 text-amber-800 border-amber-200" :
@@ -9,7 +12,7 @@ export function showToast(message, type = "success") {
   }">${message}</div>`;
   toastEl.classList.remove("hidden");
   toastEl.classList.add("toast-show");
-  setTimeout(() => {
+  toastTimeout = setTimeout(() => {
     toastEl.classList.add("hidden");
     toastEl.innerHTML = "";
   }, 3000);

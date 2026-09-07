@@ -1,5 +1,5 @@
 import { db } from './firebase.js';
-import { showToast, formatNPR, escapeHtml, generateSku } from './helpers.js';
+import { showToast, formatNPR, escapeHtml, generateSku } from './helper.js';
 import { 
   collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, 
   query, orderBy, getDocs
@@ -223,7 +223,7 @@ function render() {
 
       <div class="bg-white rounded-lg border shadow-sm overflow-x-auto">
         <table class="w-full text-left text-sm">
-          <thead class="bg-zinc-50 border-b"><tr>${['SKU', 'Product', 'Category', 'Price (NPR)', 'Stock', 'Status', 'Value', 'Actions'].map(h => `<th class="p-3 text-xs font-semibold text-zinc-500 uppercase">${h}</th>`).join('')}?</thead>
+          <thead class="bg-zinc-50 border-b"><tr>${['SKU', 'Product', 'Category', 'Price (NPR)', 'Stock', 'Status', 'Value', 'Actions'].map(h => `<th class="p-3 text-xs font-semibold text-zinc-500 uppercase">${h}</th>`).join('')}</tr></thead>
           <tbody class="divide-y">
             ${filtered.map(p => `
               <tr class="hover:bg-zinc-50/50">
@@ -231,13 +231,13 @@ function render() {
                 <td class="p-3 font-medium">${escapeHtml(p.name)}</td>
                 <td class="p-3">${escapeHtml(p.category)}</td>
                 <td class="p-3">${formatNPR(p.price)}</td>
-                <td class="p-3"><div class="flex items-center gap-2"><button class="decr w-6 h-6 border rounded hover:bg-zinc-100" data-id="${p.id}" ${p.stock === 0 ? 'disabled' : ''}>-</button><span class="w-8 text-center">${p.stock}</span><button class="incr w-6 h-6 border rounded hover:bg-zinc-100" data-id="${p.id}">+</button></div></td>
+                <td class="p-3"><div class="flex items-center gap-2"><button type="button" class="decr w-6 h-6 border rounded hover:bg-zinc-100" data-id="${p.id}" ${p.stock === 0 ? 'disabled' : ''}>-</button><span class="w-8 text-center">${p.stock}</span><button type="button" class="incr w-6 h-6 border rounded hover:bg-zinc-100" data-id="${p.id}">+</button></div></td>
                 <td class="p-3">${p.stock === 0 ? '<span class="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs">Out</span>' : p.stock <= p.minStock ? '<span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs">Low</span>' : '<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs">In</span>'}</td>
                 <td class="p-3 font-medium">${formatNPR(p.price * p.stock)}</td>
                 <td class="p-3">
                   ${deleteConfirmId === p.id ? 
-                    `<div class="flex gap-2"><button class="confirm-del bg-red-600 text-white px-2 py-0.5 rounded text-xs" data-id="${p.id}">Yes</button><button class="cancel-del bg-zinc-200 px-2 py-0.5 rounded text-xs">No</button></div>` :
-                    `<div class="flex gap-3"><button class="edit-product text-blue-600" data-id="${p.id}">Edit</button><button class="delete-product text-red-600" data-id="${p.id}">Del</button></div>`
+                    `<div class="flex gap-2"><button type="button" class="confirm-del bg-red-600 text-white px-2 py-0.5 rounded text-xs" data-id="${p.id}">Yes</button><button type="button" class="cancel-del bg-zinc-200 px-2 py-0.5 rounded text-xs">No</button></div>` :
+                    `<div class="flex gap-3"><button type="button" class="edit-product text-blue-600" data-id="${p.id}">Edit</button><button type="button" class="delete-product text-red-600" data-id="${p.id}">Del</button></div>`
                   }
                 </td>
               </tr>
@@ -277,8 +277,8 @@ function render() {
             <div class="flex justify-between items-center border-b py-2">
               <span class="text-sm">${escapeHtml(cat.name)}</span>
               <div class="flex gap-2">
-                <button class="edit-cat text-blue-600 text-xs" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}">Edit</button>
-                <button class="delete-cat text-red-600 text-xs" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}">Delete</button>
+                <button type="button" class="edit-cat text-blue-600 text-xs" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}">Edit</button>
+                <button type="button" class="delete-cat text-red-600 text-xs" data-id="${cat.id}" data-name="${escapeHtml(cat.name)}">Delete</button>
               </div>
             </div>
           `).join('')}
@@ -370,7 +370,6 @@ function attachEventListeners() {
   document.querySelectorAll('.confirm-del').forEach(btn => btn.addEventListener('click', async () => {
     await deleteProduct(btn.dataset.id);
     deleteConfirmId = null;
-    render();
   }));
   document.querySelectorAll('.cancel-del').forEach(btn => btn.addEventListener('click', () => {
     deleteConfirmId = null;
@@ -444,19 +443,23 @@ function openEditModal(product) {
   document.getElementById('editMinStock').value = product.minStock || 5;
   modal.classList.remove('hidden');
 
-  
+
   const editNameInput = document.getElementById('editName');
   const editSkuInput = document.getElementById('editSku');
   if (editNameInput && editSkuInput) {
-   
-    const generated = generateSmartSKU(editNameInput.value);
-    if (generated) editSkuInput.value = generated;
-   
+
+    if (!editSkuInput.value) {
+      const generated = generateSmartSKU(editNameInput.value);
+      if (generated) editSkuInput.value = generated;
+    }
+
     editNameInput.removeEventListener('input', editNameInput._skuHandler);
     editNameInput._skuHandler = function() {
-      const gen = generateSmartSKU(editNameInput.value);
-      if (gen) editSkuInput.value = gen;
-      else editSkuInput.value = '';
+      if (!editSkuInput.value) {
+        const gen = generateSmartSKU(editNameInput.value);
+        if (gen) editSkuInput.value = gen;
+        else editSkuInput.value = '';
+      }
     };
     editNameInput.addEventListener('input', editNameInput._skuHandler);
   }
