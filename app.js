@@ -1,9 +1,10 @@
-import { db } from './firebase.js';
+import { db, auth } from './firebase.js';
 import { showToast, formatNPR, escapeHtml, generateSku } from './helper.js';
 import { 
   collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, 
   query, orderBy, getDocs
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 
 let products = [];
@@ -13,10 +14,11 @@ let selectedCategory = 'All';
 let statusFilter = 'All';
 let deleteConfirmId = null;
 let statsMode = 'all';
+let searchDebounceTimer = null;
+let isLoading = true;
 
 const productsRef = collection(db, "products");
 const categoriesRef = collection(db, "categories");
-
 
 const DEFAULT_CATEGORIES = [
   'Smartphones (New)', 'Smartphones (Used/Refurbished)', 'Feature Phones',
@@ -33,6 +35,17 @@ const DEFAULT_CATEGORIES = [
   'Mobile Gaming Controllers'
 ];
 
+const productMap = new Map();
+const categoryMap = new Map();
+
+function getProductById(id) {
+  return productMap.get(id);
+}
+
+function getCategoryOptions() {
+  return categories.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+}
+
 async function seedDefaultCategories() {
   const snapshot = await getDocs(categoriesRef);
   if (snapshot.empty) {
@@ -42,7 +55,6 @@ async function seedDefaultCategories() {
     showToast("Default categories added", "info");
   }
 }
-
 
 async function addProduct(data) {
   try {
@@ -82,7 +94,6 @@ async function deleteProduct(id) {
   }
 }
 
-
 async function addCategory(name) {
   if (!name.trim()) return showToast("Category name required", "error");
   const exists = categories.some(c => c.name.toLowerCase() === name.trim().toLowerCase());
@@ -93,19 +104,21 @@ async function addCategory(name) {
 
 async function updateCategory(id, newName) {
   if (!newName.trim()) return showToast("Name required", "error");
-  await updateDoc(doc(db, "categories", id), { name: newName.trim() });
+  const category = categories.find(c => c.id === id);
+  const order = category ? category.order : categories.length;
+  await updateDoc(doc(db, "categories", id), { name: newName.trim(), order });
   showToast("Category updated");
 }
 
 async function deleteCategory(id) {
-  const catName = categories.find(c => c.id === id)?.name;
-  const used = products.some(p => p.category === catName);
+  const cat = categories.find(c => c.id === id);
+  if (!cat) return showToast("Category not found", "error");
+  const used = products.some(p => p.category === cat.name);
   if (used) return showToast("Cannot delete: category used by products", "error");
   await deleteDoc(doc(db, "categories", id));
   showToast("Category deleted", "warning");
   render();
 }
-
 
 function computeStats(productList) {
   return productList.reduce((acc, p) => {
@@ -117,23 +130,17 @@ function computeStats(productList) {
   }, { value: 0, items: 0, low: 0, out: 0 });
 }
 
-
 function generateSmartSKU(name) {
   if (!name.trim()) return '';
   const words = name.trim().split(/\s+/).slice(0, 2);
   if (words.length === 0) return '';
   const skuParts = words.map(word => {
-   
     const digits = word.match(/\d+/);
     if (digits) return digits[0];
-   
     return word.length >= 2 ? word.substring(0, 2) : word;
   });
-  const sku = skuParts.join('-');
-  console.log(`Generated SKU for "${name}": "${sku}"`); 
-  return sku;
+  return skuParts.join('-').toUpperCase();
 }
-
 
 function render() {
   const filtered = products.filter(p => {
@@ -155,14 +162,14 @@ function render() {
     statsLabel = ` (${selectedCategory})`;
   } else {
     stats = computeStats(products);
-    statsLabel = ' (All)';
+    statsLabel = statsMode === 'category' ? ' (All Categories)' : ' (All)';
   }
   const alertCount = stats.low + stats.out;
 
   const appDiv = document.getElementById('app');
   if (!appDiv) return;
 
-  const categoryOptions = categories.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  const categoryOptions = getCategoryOptions();
 
   appDiv.innerHTML = `
     <div class="max-w-7xl mx-auto p-6">
@@ -221,31 +228,37 @@ function render() {
         <button type="submit" class="px-4 py-1 bg-zinc-900 text-white rounded-md text-sm h-9">+ Add</button>
       </form>
 
-      <div class="bg-white rounded-lg border shadow-sm overflow-x-auto">
-        <table class="w-full text-left text-sm">
-          <thead class="bg-zinc-50 border-b"><tr>${['SKU', 'Product', 'Category', 'Price (NPR)', 'Stock', 'Status', 'Value', 'Actions'].map(h => `<th class="p-3 text-xs font-semibold text-zinc-500 uppercase">${h}</th>`).join('')}</tr></thead>
-          <tbody class="divide-y">
-            ${filtered.map(p => `
-              <tr class="hover:bg-zinc-50/50">
-                <td class="p-3 font-mono text-xs">${escapeHtml(p.sku || p.id.slice(0,6))}</td>
-                <td class="p-3 font-medium">${escapeHtml(p.name)}</td>
-                <td class="p-3">${escapeHtml(p.category)}</td>
-                <td class="p-3">${formatNPR(p.price)}</td>
-                <td class="p-3"><div class="flex items-center gap-2"><button type="button" class="decr w-6 h-6 border rounded hover:bg-zinc-100" data-id="${p.id}" ${p.stock === 0 ? 'disabled' : ''}>-</button><span class="w-8 text-center">${p.stock}</span><button type="button" class="incr w-6 h-6 border rounded hover:bg-zinc-100" data-id="${p.id}">+</button></div></td>
-                <td class="p-3">${p.stock === 0 ? '<span class="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs">Out</span>' : p.stock <= p.minStock ? '<span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs">Low</span>' : '<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs">In</span>'}</td>
-                <td class="p-3 font-medium">${formatNPR(p.price * p.stock)}</td>
-                <td class="p-3">
-                  ${deleteConfirmId === p.id ? 
-                    `<div class="flex gap-2"><button type="button" class="confirm-del bg-red-600 text-white px-2 py-0.5 rounded text-xs" data-id="${p.id}">Yes</button><button type="button" class="cancel-del bg-zinc-200 px-2 py-0.5 rounded text-xs">No</button></div>` :
-                    `<div class="flex gap-3"><button type="button" class="edit-product text-blue-600" data-id="${p.id}">Edit</button><button type="button" class="delete-product text-red-600" data-id="${p.id}">Del</button></div>`
-                  }
-                </td>
-              </tr>
-            `).join('')}
-            ${filtered.length === 0 ? `<tr><td colspan="8" class="p-8 text-center text-zinc-400">No products found</td>` : ''}
-          </tbody>
-        </table>
-      </div>
+      ${isLoading ? `
+        <div class="bg-white rounded-lg border shadow-sm p-8 text-center text-zinc-500">
+          Loading products...
+        </div>
+      ` : `
+        <div class="bg-white rounded-lg border shadow-sm overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-zinc-50 border-b"><tr>${['SKU', 'Product', 'Category', 'Price (NPR)', 'Stock', 'Status', 'Value', 'Actions'].map(h => `<th class="p-3 text-xs font-semibold text-zinc-500 uppercase">${h}</th>`).join('')}</tr></thead>
+            <tbody class="divide-y">
+              ${filtered.map(p => `
+                <tr class="hover:bg-zinc-50/50">
+                  <td class="p-3 font-mono text-xs">${escapeHtml(p.sku || p.id.slice(0,6))}</td>
+                  <td class="p-3 font-medium">${escapeHtml(p.name)}</td>
+                  <td class="p-3">${escapeHtml(p.category)}</td>
+                  <td class="p-3">${formatNPR(p.price)}</td>
+                  <td class="p-3"><div class="flex items-center gap-2"><button type="button" class="decr w-6 h-6 border rounded hover:bg-zinc-100" data-id="${p.id}" ${p.stock === 0 ? 'disabled' : ''}>-</button><span class="w-8 text-center">${p.stock}</span><button type="button" class="incr w-6 h-6 border rounded hover:bg-zinc-100" data-id="${p.id}">+</button></div></td>
+                  <td class="p-3">${p.stock === 0 ? '<span class="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs">Out</span>' : p.stock <= p.minStock ? '<span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs">Low</span>' : '<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs">In</span>'}</td>
+                  <td class="p-3 font-medium">${formatNPR(p.price * p.stock)}</td>
+                  <td class="p-3">
+                    ${deleteConfirmId === p.id ? 
+                      `<div class="flex gap-2"><button type="button" class="confirm-del bg-red-600 text-white px-2 py-0.5 rounded text-xs" data-id="${p.id}">Yes</button><button type="button" class="cancel-del bg-zinc-200 px-2 py-0.5 rounded text-xs">No</button></div>` :
+                      `<div class="flex gap-3"><button type="button" class="edit-product text-blue-600" data-id="${p.id}">Edit</button><button type="button" class="delete-product text-red-600" data-id="${p.id}">Del</button></div>`
+                    }
+                  </td>
+                </tr>
+              `).join('')}
+              ${filtered.length === 0 ? `<tr><td colspan="8" class="p-8 text-center text-zinc-400">No products found</td>` : ''}
+            </tbody>
+          </table>
+        </div>
+      `}
     </div>
 
     <!-- Edit Product Modal -->
@@ -288,97 +301,167 @@ function render() {
         </div>
       </div>
     </div>
+
+    <!-- Edit Category Modal -->
+    <div id="editCategoryModal" class="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50 hidden">
+      <div class="bg-white rounded-lg w-full max-w-md p-6">
+        <h2 class="text-xl font-semibold mb-4">Edit Category</h2>
+        <form id="editCategoryForm">
+          <input type="hidden" id="editCategoryId">
+          <div class="mb-4"><label class="block text-sm font-medium mb-1">Category Name *</label><input id="editCategoryName" required class="w-full border rounded-md p-2 text-sm"></div>
+          <div class="flex justify-end gap-2"><button type="button" id="closeEditCategoryModal" class="px-4 py-2 border rounded-md text-sm">Cancel</button><button type="submit" class="px-4 py-2 bg-zinc-900 text-white rounded-md text-sm">Save</button></div>
+        </form>
+      </div>
+    </div>
   `;
 
   attachEventListeners();
 }
 
+let eventCleanups = [];
+
+function addEventListenerSafe(element, event, handler) {
+  if (element) {
+    element.addEventListener(event, handler);
+    eventCleanups.push(() => element.removeEventListener(event, handler));
+  }
+}
+
+function cleanupEventListeners() {
+  eventCleanups.forEach(cleanup => cleanup());
+  eventCleanups = [];
+}
 
 function attachEventListeners() {
-  document.getElementById('searchInput')?.addEventListener('input', e => { searchQuery = e.target.value; render(); });
-  document.getElementById('categorySelect')?.addEventListener('change', e => { selectedCategory = e.target.value; render(); });
-  document.getElementById('statusSelect')?.addEventListener('change', e => { statusFilter = e.target.value; render(); });
-  document.getElementById('clearFilters')?.addEventListener('click', () => { searchQuery = ''; selectedCategory = 'All'; statusFilter = 'All'; render(); });
+  cleanupEventListeners();
+
+  addEventListenerSafe(document.getElementById('searchInput'), 'input', (e) => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      searchQuery = e.target.value;
+      render();
+    }, 300);
+  });
+
+  addEventListenerSafe(document.getElementById('categorySelect'), 'change', (e) => {
+    selectedCategory = e.target.value;
+    if (statsMode === 'category' && selectedCategory === 'All') {
+      statsMode = 'all';
+    }
+    render();
+  });
+
+  addEventListenerSafe(document.getElementById('statusSelect'), 'change', (e) => {
+    statusFilter = e.target.value;
+    render();
+  });
+
+  addEventListenerSafe(document.getElementById('clearFilters'), 'click', () => {
+    searchQuery = '';
+    selectedCategory = 'All';
+    statusFilter = 'All';
+    document.getElementById('searchInput').value = '';
+    document.getElementById('categorySelect').value = 'All';
+    document.getElementById('statusSelect').value = 'All';
+    render();
+  });
 
   const toggleBtn = document.getElementById('toggleStatsMode');
-  if (toggleBtn) {
-    toggleBtn.addEventListener('click', () => {
-      statsMode = statsMode === 'all' ? 'category' : 'all';
-      render();
-    });
-  }
+  addEventListenerSafe(toggleBtn, 'click', () => {
+    statsMode = statsMode === 'all' ? 'category' : 'all';
+    if (statsMode === 'category' && selectedCategory === 'All') {
+      showToast("Select a category to view category stats", "info");
+    }
+    render();
+  });
 
   const addForm = document.getElementById('inlineAddForm');
-  if (addForm) {
-    addForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const name = document.getElementById('newName').value.trim();
-      if (!name) return showToast('Product name required', 'error');
-      const price = parseFloat(document.getElementById('newPrice').value);
-      const stock = parseInt(document.getElementById('newStock').value);
-      if (isNaN(price) || price < 0) return showToast('Invalid price', 'error');
-      if (isNaN(stock) || stock < 0) return showToast('Invalid stock', 'error');
-      const data = {
-        name,
-        sku: document.getElementById('newSku').value.trim() || generateSku(),
-        category: document.getElementById('newCategory').value,
-        price,
-        stock,
-        minStock: parseInt(document.getElementById('newMinStock').value) || 5
-      };
-      await addProduct(data);
-      document.getElementById('newSku').value = '';
-      document.getElementById('newName').value = '';
-      document.getElementById('newStock').value = '0';
-      document.getElementById('newPrice').value = '';
-      document.getElementById('newMinStock').value = '5';
-    });
+  addEventListenerSafe(addForm, 'submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('newName').value.trim();
+    if (!name) return showToast('Product name required', 'error');
+    const price = parseFloat(document.getElementById('newPrice').value);
+    const stock = parseInt(document.getElementById('newStock').value);
+    if (isNaN(price) || price < 0) return showToast('Invalid price', 'error');
+    if (isNaN(stock) || stock < 0) return showToast('Invalid stock', 'error');
+    const data = {
+      name,
+      sku: document.getElementById('newSku').value.trim() || generateSku(),
+      category: document.getElementById('newCategory').value,
+      price,
+      stock,
+      minStock: parseInt(document.getElementById('newMinStock').value) || 5
+    };
+    await addProduct(data);
+    document.getElementById('newSku').value = '';
+    document.getElementById('newName').value = '';
+    document.getElementById('newStock').value = '0';
+    document.getElementById('newPrice').value = '';
+    document.getElementById('newMinStock').value = '5';
+  });
 
-    const newNameInput = document.getElementById('newName');
-    const newSkuInput = document.getElementById('newSku');
-    if (newNameInput && newSkuInput) {
-      newNameInput.addEventListener('input', () => {
- 
-        const generated = generateSmartSKU(newNameInput.value);
-        if (generated) newSkuInput.value = generated;
-        else newSkuInput.value = ''; 
-      });
-    }
+  const newNameInput = document.getElementById('newName');
+  const newSkuInput = document.getElementById('newSku');
+  if (newNameInput && newSkuInput) {
+    const handler = () => {
+      const generated = generateSmartSKU(newNameInput.value);
+      if (generated) newSkuInput.value = generated;
+      else newSkuInput.value = '';
+    };
+    addEventListenerSafe(newNameInput, 'input', handler);
   }
 
-  
-  document.querySelectorAll('.incr').forEach(btn => btn.addEventListener('click', async () => {
-    const id = btn.dataset.id;
-    const prod = products.find(p => p.id === id);
-    if (prod) await updateStock(id, prod.stock + 1);
-  }));
-  document.querySelectorAll('.decr').forEach(btn => btn.addEventListener('click', async () => {
-    const id = btn.dataset.id;
-    const prod = products.find(p => p.id === id);
-    if (prod && prod.stock > 0) await updateStock(id, prod.stock - 1);
-  }));
+  document.querySelectorAll('.incr').forEach(btn => {
+    addEventListenerSafe(btn, 'click', async () => {
+      const id = btn.dataset.id;
+      const prod = getProductById(id);
+      if (prod) await updateStock(id, prod.stock + 1);
+    });
+  });
 
-  document.querySelectorAll('.edit-product').forEach(btn => btn.addEventListener('click', () => {
-    const id = btn.dataset.id;
-    const prod = products.find(p => p.id === id);
-    if (prod) openEditModal(prod);
-  }));
-  document.querySelectorAll('.delete-product').forEach(btn => btn.addEventListener('click', () => {
-    deleteConfirmId = btn.dataset.id;
-    render();
-  }));
-  document.querySelectorAll('.confirm-del').forEach(btn => btn.addEventListener('click', async () => {
-    await deleteProduct(btn.dataset.id);
-    deleteConfirmId = null;
-  }));
-  document.querySelectorAll('.cancel-del').forEach(btn => btn.addEventListener('click', () => {
-    deleteConfirmId = null;
-    render();
-  }));
+  document.querySelectorAll('.decr').forEach(btn => {
+    addEventListenerSafe(btn, 'click', async () => {
+      const id = btn.dataset.id;
+      const prod = getProductById(id);
+      if (prod && prod.stock > 0) await updateStock(id, prod.stock - 1);
+    });
+  });
+
+  document.querySelectorAll('.edit-product').forEach(btn => {
+    addEventListenerSafe(btn, 'click', () => {
+      const id = btn.dataset.id;
+      const prod = getProductById(id);
+      if (prod) openEditModal(prod);
+    });
+  });
+
+  document.querySelectorAll('.delete-product').forEach(btn => {
+    addEventListenerSafe(btn, 'click', () => {
+      deleteConfirmId = btn.dataset.id;
+      render();
+    });
+  });
+
+  document.querySelectorAll('.confirm-del').forEach(btn => {
+    addEventListenerSafe(btn, 'click', async () => {
+      await deleteProduct(btn.dataset.id);
+      deleteConfirmId = null;
+    });
+  });
+
+  document.querySelectorAll('.cancel-del').forEach(btn => {
+    addEventListenerSafe(btn, 'click', () => {
+      deleteConfirmId = null;
+      render();
+    });
+  });
 
   const modal = document.getElementById('editModal');
-  document.getElementById('closeModalBtn')?.addEventListener('click', () => modal.classList.add('hidden'));
-  document.getElementById('editForm')?.addEventListener('submit', async (e) => {
+  addEventListenerSafe(document.getElementById('closeModalBtn'), 'click', () => {
+    modal.classList.add('hidden');
+  });
+
+  addEventListenerSafe(document.getElementById('editForm'), 'submit', async (e) => {
     e.preventDefault();
     const id = document.getElementById('editId').value;
     const data = {
@@ -399,36 +482,49 @@ function attachEventListeners() {
   const catModal = document.getElementById('categoryModal');
   const openAdmin = () => catModal.classList.remove('hidden');
   const closeAdmin = () => catModal.classList.add('hidden');
-  document.getElementById('headerAdminTrigger')?.addEventListener('dblclick', openAdmin);
-  document.getElementById('closeCategoryModal')?.addEventListener('click', closeAdmin);
-  document.getElementById('addCategoryForm')?.addEventListener('submit', async (e) => {
+
+  addEventListenerSafe(document.getElementById('headerAdminTrigger'), 'dblclick', openAdmin);
+  addEventListenerSafe(document.getElementById('closeCategoryModal'), 'click', closeAdmin);
+
+  addEventListenerSafe(document.getElementById('addCategoryForm'), 'submit', async (e) => {
     e.preventDefault();
     const name = document.getElementById('newCategoryName').value.trim();
     await addCategory(name);
     document.getElementById('newCategoryName').value = '';
-    render();
     closeAdmin();
     openAdmin();
   });
+
   document.querySelectorAll('.edit-cat').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    addEventListenerSafe(btn, 'click', () => {
       const id = btn.dataset.id;
-      const oldName = btn.dataset.name;
-      const newName = prompt('Edit category name:', oldName);
-      if (newName && newName !== oldName) await updateCategory(id, newName);
-      closeAdmin();
-      render();
-      openAdmin();
+      const name = btn.dataset.name;
+      openEditCategoryModal(id, name);
     });
   });
+
   document.querySelectorAll('.delete-cat').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    addEventListenerSafe(btn, 'click', async () => {
       const id = btn.dataset.id;
       if (confirm('Delete this category? It cannot be used by any product.')) await deleteCategory(id);
       closeAdmin();
-      render();
       openAdmin();
     });
+  });
+
+  const editCatModal = document.getElementById('editCategoryModal');
+  addEventListenerSafe(document.getElementById('closeEditCategoryModal'), 'click', () => {
+    editCatModal.classList.add('hidden');
+  });
+
+  addEventListenerSafe(document.getElementById('editCategoryForm'), 'submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('editCategoryId').value;
+    const newName = document.getElementById('editCategoryName').value.trim();
+    await updateCategory(id, newName);
+    editCatModal.classList.add('hidden');
+    closeAdmin();
+    openAdmin();
   });
 }
 
@@ -443,39 +539,71 @@ function openEditModal(product) {
   document.getElementById('editMinStock').value = product.minStock || 5;
   modal.classList.remove('hidden');
 
-
   const editNameInput = document.getElementById('editName');
   const editSkuInput = document.getElementById('editSku');
   if (editNameInput && editSkuInput) {
-
     if (!editSkuInput.value) {
       const generated = generateSmartSKU(editNameInput.value);
       if (generated) editSkuInput.value = generated;
     }
 
-    editNameInput.removeEventListener('input', editNameInput._skuHandler);
-    editNameInput._skuHandler = function() {
+    const handler = () => {
       if (!editSkuInput.value) {
         const gen = generateSmartSKU(editNameInput.value);
         if (gen) editSkuInput.value = gen;
         else editSkuInput.value = '';
       }
     };
-    editNameInput.addEventListener('input', editNameInput._skuHandler);
+    addEventListenerSafe(editNameInput, 'input', handler);
   }
 }
 
+function openEditCategoryModal(id, name) {
+  const modal = document.getElementById('editCategoryModal');
+  document.getElementById('editCategoryId').value = id;
+  document.getElementById('editCategoryName').value = name;
+  modal.classList.remove('hidden');
+}
+
+async function initAuth() {
+  try {
+    await signInAnonymously(auth);
+  } catch (error) {
+    console.error("Auth error:", error);
+    showToast("Authentication failed", "error");
+  }
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    console.log("Signed in as:", user.uid);
+  }
+});
 
 const productsQuery = query(productsRef, orderBy('name'));
 onSnapshot(productsQuery, (snapshot) => {
   products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  productMap.clear();
+  products.forEach(p => productMap.set(p.id, p));
+  isLoading = false;
+  render();
+}, (error) => {
+  console.error("Products snapshot error:", error);
+  showToast("Error loading products", "error");
+  isLoading = false;
   render();
 });
 
 const categoriesQuery = query(categoriesRef, orderBy('order'));
 onSnapshot(categoriesQuery, (snapshot) => {
-  categories = snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
+  categories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  categoryMap.clear();
+  categories.forEach(c => categoryMap.set(c.id, c));
   render();
+}, (error) => {
+  console.error("Categories snapshot error:", error);
+  showToast("Error loading categories", "error");
 });
 
 seedDefaultCategories();
+initAuth();
