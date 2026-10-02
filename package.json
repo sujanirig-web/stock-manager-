@@ -1,0 +1,13 @@
+{
+  "name": "stock-manager",
+  "version": "1.0.0",
+  "description": "Inventory manager for a mobile-accessories shop (NPR) backed by Firebase Firestore",
+  "private": true,
+  "scripts": {
+    "start": "serve --listen 3000 .",
+    "dev": "serve --listen 3000 ."
+  },
+  "devDependencies": {
+    "serve": "^14.2.6"
+  }
+}
